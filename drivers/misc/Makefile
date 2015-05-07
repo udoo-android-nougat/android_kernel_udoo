@@ -61,3 +61,5 @@ obj-$(CONFIG_VEXPRESS_SYSCFG)	+= vexpress-syscfg.o
 obj-$(CONFIG_CXL_BASE)		+= cxl/
 obj-$(CONFIG_UID_CPUTIME) += uid_cputime.o
 obj-$(CONFIG_MEMORY_STATE_TIME) += memory_state_time.o
+obj-$(CONFIG_FXOS8700_ACC_MAG_I2C)	+= udooneo/
+obj-$(CONFIG_FXAS2100X_GYRO_I2C)	+= udooneo/
