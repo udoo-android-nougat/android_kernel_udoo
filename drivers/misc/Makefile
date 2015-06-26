@@ -63,3 +63,4 @@ obj-$(CONFIG_UID_CPUTIME) += uid_cputime.o
 obj-$(CONFIG_MEMORY_STATE_TIME) += memory_state_time.o
 obj-$(CONFIG_FXOS8700_ACC_MAG_I2C)	+= udooneo/
 obj-$(CONFIG_FXAS2100X_GYRO_I2C)	+= udooneo/
+obj-$(CONFIG_UDOO_ARD)		+= udoo_ard.o
