@@ -166,5 +166,12 @@ config POWER_RESET_RMOBILE
 	help
 	  Reboot support for Renesas R-Mobile and SH-Mobile SoCs.
 
+config POWER_RESET_UDOO
+	bool "UDOO power-off driver"
+	depends on POWER_RESET
+	help
+	  This driver supports powering down the UDOO.
+	  Say Y if you have a UDOO.
+
 endif
 
