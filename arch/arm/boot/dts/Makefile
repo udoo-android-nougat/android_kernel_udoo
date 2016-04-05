@@ -281,6 +281,7 @@ dtb-$(CONFIG_SOC_IMX6Q) += \
 	imx6dl-tx6dl-comtft.dtb \
 	imx6dl-tx6u-801x.dtb \
 	imx6dl-tx6u-811x.dtb \
+	imx6dl-seco_A62.dtb \
 	imx6dl-udoo.dtb \
 	imx6dl-sabresd-enetirq.dtb \
 	imx6dl-wandboard.dtb \
@@ -332,6 +333,7 @@ dtb-$(CONFIG_SOC_IMX6Q) += \
 	imx6q-tx6q-1020.dtb \
 	imx6q-tx6q-1020-comtft.dtb \
 	imx6q-tx6q-1110.dtb \
+	imx6q-seco_A62.dtb \
 	imx6q-udoo-hdmi.dtb \
 	imx6q-udoo-lvds7.dtb \
 	imx6q-udoo-lvds15.dtb \
