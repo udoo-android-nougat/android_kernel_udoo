@@ -42,6 +42,7 @@
 #include "common.h"
 #include "cpuidle.h"
 #include "hardware.h"
+#include "apx_wdog-trigger.h"
 
 /* For imx6q sabrelite board: set KSZ9021RN RGMII pad skew */
 static int ksz9021rn_phy_fixup(struct phy_device *phydev)
@@ -337,6 +338,37 @@ static inline void imx6q_enet_init(void)
 		imx6q_enet_clk_sel();
 }
 
+
+/* Add auxdata to pass platform data */
+static const struct of_dev_auxdata imx6q_auxdata_lookup[] __initconst = {
+	OF_DEV_AUXDATA("fsl,imx6q-flexcan", 0x02090000, NULL, &flexcan_pdata[0]),
+	OF_DEV_AUXDATA("fsl,imx6q-flexcan", 0x02094000, NULL, &flexcan_pdata[1]),
+	OF_DEV_AUXDATA("fsl,imx6q-fec", 0x02188000, NULL, &fec_pdata),
+	{ /* sentinel */ }
+};
+
+static const struct apx_wdog_trigger_data apx_wdt_a62 __initconst = {
+	.gpio_trg__iomux_ctrl   = 0x020e00b8,
+	.gpio_trg__pad_ctrl     = 0x20e03cc,
+	.gpio_trg__base         = 0x020a4000,
+	.gpio_trg__num           = 25,
+	.gpio_en__iomux_ctrl    = 0x20e020c,
+	.gpio_en__pad_ctrl      = 0x20e05dc,
+	.gpio_en__base          = 0x020a8000,
+	.gpio_en__num           = 11,
+};
+
+static const struct apx_wdog_trigger_data apx_wdt_udoo __initconst = {
+	.gpio_trg__iomux_ctrl   = 0x020E009C, //GPIO3_IO19
+	.gpio_trg__pad_ctrl     = 0x020E03B0,
+	.gpio_trg__base         = 0x020a4000,
+	.gpio_trg__num          = 19,
+	.gpio_en__iomux_ctrl    = 0x020E00D4, //GPIO5_IO04
+	.gpio_en__pad_ctrl      = 0x020E03E8,
+	.gpio_en__base          = 0x020ac000,
+	.gpio_en__num           = 4,
+};
+
 static void __init imx6q_init_machine(void)
 {
 	struct device *parent;
@@ -346,12 +378,32 @@ static void __init imx6q_init_machine(void)
 	else
 		imx_print_silicon_rev(cpu_is_imx6dl() ? "i.MX6DL" : "i.MX6Q",
 				 imx_get_soc_revision());
+	if ( of_machine_is_compatible("fsl,imx6q-SBC_A62") ||
+			of_machine_is_compatible("fsl,imx6dl-SBC_A62") ) {
+	
+		apx_wdog_trigger_early_init (&apx_wdt_a62, 0);
+
+	}
+
+	if ( of_machine_is_compatible("udoo,imx6q-udoo") ||
+			of_machine_is_compatible("udoo,imx6dl-udoo") ) {
+		apx_wdog_trigger_early_init (&apx_wdt_udoo, 0);
+	}
 
 	parent = imx_soc_device_init();
 	if (parent == NULL)
 		pr_warn("failed to initialize soc device\n");
 
 	of_platform_populate(NULL, of_default_bus_match_table, NULL, parent);
+
+	if ( of_machine_is_compatible("fsl,imx6q-SBC_A62") ||
+			of_machine_is_compatible("fsl,imx6dl-SBC_A62") ||
+			of_machine_is_compatible("udoo,imx6q-udoo") ||
+			of_machine_is_compatible("udoo,imx6dl-udoo") ) {
+		
+		apx_wdog_trigger_work_init(1);
+
+	}
 
 	imx6q_enet_init();
 	imx_anatop_init();
