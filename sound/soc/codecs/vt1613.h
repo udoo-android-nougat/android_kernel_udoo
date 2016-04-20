@@ -9,6 +9,8 @@
  *  option) any later version.
  */
 
+extern bool vt1613_modules_dep;
+
 #ifndef _VT1613_H
 #define _VT1613_H
 

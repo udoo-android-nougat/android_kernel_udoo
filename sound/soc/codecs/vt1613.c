@@ -34,6 +34,8 @@
 #include "vt1613.h"
 #define DRV_NAME "vt1613-codec"
 
+bool vt1613_modules_dep = true;
+
 /* TODO: S/PDIF implementation. As this driver was developed for UDOO board's needs,
 * we skipped S/PDIF features developing*/ 
 
@@ -276,17 +278,21 @@ static int vt1613_set_bias_level(struct snd_soc_codec *codec,
 
 static int vt1613_reset(struct snd_soc_codec *codec, int try_warm)
 {
-	
+	struct snd_ac97 *ac97 = snd_soc_codec_get_drvdata(codec);
+
 	if (try_warm && soc_ac97_ops->warm_reset) {
-		soc_ac97_ops->warm_reset(codec->ac97);
+		soc_ac97_ops->warm_reset(ac97);
 		if (snd_soc_read(codec, AC97_RESET) == 0x0140)
 			return 1;
 	}
-	soc_ac97_ops->reset(codec->ac97);
+	soc_ac97_ops->reset(ac97);
+	
 	if (soc_ac97_ops->warm_reset)
-		soc_ac97_ops->warm_reset(codec->ac97);
+		soc_ac97_ops->warm_reset(ac97);
 	if (snd_soc_read(codec, AC97_RESET) == 0x0140) 
 		return 0;
+
+	dev_err(codec->dev, "Failed to reset: AC97 link error\n");
 
 	return -EIO;
 }
@@ -303,7 +309,7 @@ static struct snd_soc_dai_ops vt1613_dai_ops_digital = {
 struct snd_soc_dai_driver vt1613_dai[] = {
 {
 	.name = "vt1613-hifi-analog",
-	.ac97_control = 1,
+	.bus_control = true,
 
 	.playback = {
 		.stream_name = "Playback",
@@ -324,7 +330,7 @@ struct snd_soc_dai_driver vt1613_dai[] = {
 },
 {
 	.name = "vt1613-hifi-IEC958",
-	.ac97_control = 1,
+	.bus_control = true,
 
 	.playback = {
 		.stream_name = "vt1613 IEC958",
@@ -349,6 +355,7 @@ static int vt1613_codec_suspend(struct snd_soc_codec *codec)
 static int vt1613_codec_resume(struct snd_soc_codec *codec)
 {
 	u16 id, reset;
+	struct snd_ac97 *ac97 = snd_soc_codec_get_drvdata(codec);
 
 	reset = 0;
 	/* give the codec an AC97 warm reset to start the link */
@@ -357,8 +364,8 @@ reset:
 		printk(KERN_ERR "vt1613 failed to resume");
 		return -EIO;
 	}
-	codec->ac97->bus->ops->warm_reset(codec->ac97);
-	id = soc_ac97_ops->read(codec->ac97, AC97_VENDOR_ID2);
+	ac97->bus->ops->warm_reset(ac97);
+	id = soc_ac97_ops->read(ac97, AC97_VENDOR_ID2);
 	if (id != 0x4123) {
 		vt1613_reset(codec, 0);
 		reset++;
@@ -372,35 +379,32 @@ reset:
 static int vt1613_codec_probe(struct snd_soc_codec *codec)
 {
 	int ret = 0;
+        struct snd_ac97 *ac97;
 	struct regmap *regmap;
 
-	ret = snd_soc_new_ac97_codec(codec, soc_ac97_ops, 0);
-	if (ret){
+	ac97 = snd_soc_new_ac97_codec(codec);
+	if (IS_ERR(ac97)) {
+		ret = PTR_ERR(ac97);
 		dev_err(codec->dev, "Failed to register AC97 codec: %d\n", ret);
 		return ret;
-	}	
-
-	soc_ac97_dev_register(codec);
+        }
+	
+	/*soc_ac97_dev_register(codec);
 	if (ret){
 		dev_err(codec->dev, "Failed to register AC97 codec to bus: %d\n", ret);
 		goto free_ac97;
 	}
-	codec->ac97_registered = 1; 
 
-	regmap = regmap_init_ac97(codec->ac97, &vt1613_regmap_config);
+*/
+	regmap = regmap_init_ac97(ac97, &vt1613_regmap_config);
 	if (IS_ERR(regmap)) {
 		ret = PTR_ERR(regmap);
 		dev_err(codec->dev, "Failed to init register map: %d\n", ret);
 		goto free_ac97;
 	}
+        snd_soc_codec_init_regmap(codec, regmap);
 	
-	codec->control_data = regmap;
-	ret = snd_soc_codec_set_cache_io(codec, 16, 16, SND_SOC_REGMAP);
-	if (ret < 0) {
-		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
-		goto free_regmap;
-	}
-	snd_soc_codec_set_drvdata(codec, codec->ac97);
+        snd_soc_codec_set_drvdata(codec, ac97);
 
 	/* do a cold reset for the controller and then try
 	 * a warm reset followed by an optional cold reset for codec */
@@ -411,6 +415,7 @@ static int vt1613_codec_probe(struct snd_soc_codec *codec)
 		printk(KERN_ERR "Failed to reset VT1613: AC97 link error\n");
 		goto free_regmap;
 	}
+
 
 	/* Read out vendor IDs */
 	printk(KERN_INFO "VT1613 SoC Audio Codec [ID = %04x - %04x]\n", 
@@ -435,17 +440,19 @@ static int vt1613_codec_probe(struct snd_soc_codec *codec)
 	return 0;
 
 free_regmap:
-  regmap_exit(regmap);
+  snd_soc_codec_exit_regmap(codec);
+
 free_ac97:
-  snd_soc_free_ac97_codec(codec);
+  snd_soc_free_ac97_codec(ac97);
 
  	return ret;
 }
 
 static int vt1613_codec_remove(struct snd_soc_codec *codec)
 {
-	regmap_exit(codec->control_data);
-	snd_soc_free_ac97_codec(codec);
+        struct snd_ac97 *ac97 = snd_soc_codec_get_drvdata(codec);
+	snd_soc_codec_exit_regmap(codec);
+	snd_soc_free_ac97_codec(ac97);
 	return 0;
 }
 
@@ -487,6 +494,8 @@ static struct platform_driver vt1613_codec_driver = {
 };
 
 module_platform_driver(vt1613_codec_driver);
+
+EXPORT_SYMBOL_GPL(vt1613_modules_dep);
 
 MODULE_DESCRIPTION("ASoC VT1613 codec driver");
 MODULE_AUTHOR("Seco s.r.l.");
