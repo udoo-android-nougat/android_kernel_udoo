@@ -89,15 +89,15 @@
 	
 	sound {
 		compatible = "udoo,imx-vt1613-audio";
-		ssi-controller = <&ssi1>; 
+		ssi-controller = <&ssi1>;
 		audio-codec = <&codec>;
-		mux-int-port = <1>; 
-		mux-ext-port = <6>; 
+		mux-int-port = <1>;
+		mux-ext-port = <6>;
 	};
 	
 	sound-hdmi {
 		compatible = "fsl,imx6q-audio-hdmi",
-		"fsl,imx-audio-hdmi";
+			     "fsl,imx-audio-hdmi";
 		model = "imx-audio-hdmi";
 		hdmi-controller = <&hdmi_audio>;
 	};
@@ -109,14 +109,6 @@
 		mclk_source = <0>;
 		status = "okay";
 	};
-
-	v4l2_cap_1 {
-		compatible = "fsl,imx6q-v4l2-capture";
-		ipu_id = <0>;
-		csi_id = <1>;
-		mclk_source = <0>;
-		status = "okay";
-	};               
 
 	v4l2_out {
 		compatible = "fsl,mxc_v4l2_output";
@@ -144,10 +136,31 @@
 	status = "okay";
 };
 
+&fec { //ethernet
+	pinctrl-names = "default";
+	pinctrl-0 = <&pinctrl_enet>;
+	phy-mode = "rgmii";
+	phy-reset-gpios = <&gpio3 23 0>;
+	phy-reset-duration = <50>;
+	status = "okay";
+};
+
 
 &gpc { // General power controller
 	/* use ldo-bypass, u-boot will check it and configure */
 	fsl,ldo-bypass = <1>;
+};
+
+&dcic1 {
+	dcic_id = <0>;
+	dcic_mux = "dcic-hdmi";
+	status = "okay";
+};
+
+&dcic2 {
+	dcic_id = <1>;
+	dcic_mux = "dcic-lvds1";
+	status = "okay";
 };
 
 &hdmi_audio {
@@ -195,8 +208,8 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&pinctrl_i2c3>;
 	status = "okay";
-	ov5640_mipi: ov5640_mipi@3c {
-		compatible = "ovti,ov5640_mipi";
+	ov564x_mipi: ov564x_mipi@3c { /* i2c2 driver */
+		compatible = "ovti,ov564x_mipi";
 		reg = <0x3c>;
 		clocks = <&clks IMX6QDL_CLK_CKO>;
 		clock-names = "csi_mclk";
@@ -215,15 +228,6 @@
 		pinctrl-names = "default";
 		gpios = <&gpio1 15 GPIO_ACTIVE_LOW>;
 	};
-};
-
-&fec { //ethernet
-	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_enet>;
-	phy-mode = "rgmii";
-	phy-reset-gpios = <&gpio3 23 0>;
-	phy-reset-duration = <50>;
-	status = "okay";
 };
 
 &iomuxc {
@@ -370,6 +374,14 @@
 	};
 };
 
+&mipi_csi {
+	status = "okay";
+	ipu_id = <0>;
+	csi_id = <0>;
+	v_channel = <0>;
+	lanes = <2>;
+};
+
 &ssi1 {
 	fsl,mode = "ac97-slave";
 	pinctrl-names = "default", "ac97-running", "ac97-reset", "ac97-warm-reset";
@@ -404,12 +416,6 @@
 	status = "okay";
 };
 
-&usbotg {
-	pinctrl-names = "default";
-	vbus-supply = <&reg_usb_otg_vbus>;
-	status = "okay";
-};
-
 &usbh1 {
 	vbus-supply = <&reg_usb_h1_vbus>;
 	clocks = <&clks 201>;
@@ -417,10 +423,12 @@
 	status = "okay";
 };
 
-&mipi_csi {
-   status = "okay";
-   ipu_id = <0>;
-   csi_id = <0>;
-   v_channel = <0>;
-   lanes = <2>;
+&usbotg {
+	pinctrl-names = "default";
+	vbus-supply = <&reg_usb_otg_vbus>;
+	disable-over-current;
+	srp-disable;
+	hnp-disable;
+	adp-disable;
+	status = "okay";
 };
