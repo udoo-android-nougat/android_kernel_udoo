@@ -23,8 +23,6 @@
 
 static void (*pm_power_off_orig)(void) = NULL;
 static int pwr_5v_gpio = -EINVAL;
-static int lcd_panel_on_gpio = -EINVAL;
-static int lcd_backlight_gpio = -EINVAL;
 
 static void udoo_set_gpio(unsigned gpio, int value) {
 	int ret;
@@ -55,13 +53,6 @@ static void udoo_power_off(void) {
 		pm_power_off_orig();
 	}
 
-	if (lcd_panel_on_gpio != -EINVAL) {
-		udoo_set_gpio(lcd_panel_on_gpio, 0);
-	}
-	if (lcd_backlight_gpio != -EINVAL) {
-		udoo_set_gpio(lcd_backlight_gpio, 0);
-	}
-
 	if (!cpu_is_imx6sx()) {
 		if (gpio_is_valid(pwr_5v_gpio)) {
 			pr_emerg("%s: 5V power down\n", __func__);
@@ -73,22 +64,6 @@ static void udoo_power_off(void) {
 static int udoo_power_off_probe(struct platform_device *pdev)
 {
 	struct device_node *pwr_off_np;
-
-	pwr_off_np = of_find_compatible_node(NULL, NULL, "udoo,lvds-power");
-	if (pwr_off_np) {
-		printk("[UDOO power-off] Probed LVDS power.\n");
-		lcd_panel_on_gpio = of_get_named_gpio(pwr_off_np, "gpio", 0);
-		of_node_put(pwr_off_np);
-		udoo_request_gpio(&pdev->dev, lcd_panel_on_gpio, GPIOF_OUT_INIT_HIGH, "lcd_panel_on_gpio");
-	}
-	
-	pwr_off_np = of_find_compatible_node(NULL, NULL, "udoo,lvds-backlight");
-	if (pwr_off_np) {
-		printk("[UDOO power-off] Probed LVDS backlight.\n");
-		lcd_backlight_gpio = of_get_named_gpio(pwr_off_np, "gpio", 0);
-		of_node_put(pwr_off_np);
-		udoo_request_gpio(&pdev->dev, lcd_backlight_gpio, GPIOF_OUT_INIT_HIGH, "lcd_backlight_gpio");
-	}
 	
 	pwr_off_np = of_find_compatible_node(NULL, NULL, "udoo,poweroff");
 	if (pwr_off_np) {
