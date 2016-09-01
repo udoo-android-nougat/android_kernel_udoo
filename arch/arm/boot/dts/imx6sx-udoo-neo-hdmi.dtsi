@@ -39,8 +39,7 @@
 
 &lcdif1 {
 	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_lcdif_dat_0
-	&pinctrl_lcdif_ctrl_0>;
+	pinctrl-0 = <&pinctrl_lcd>;
 	lcd-supply = <&vgen5_reg>;
 	display = <&display0>;
 	status = "okay";
@@ -84,6 +83,6 @@
 
 &audmux {
 	pinctrl-names = "default";
-	pinctrl-0 = <&pinctrl_audmux>;
+	pinctrl-0 = <&pinctrl_audmux_hdmi>;
 	status = "okay";
 };

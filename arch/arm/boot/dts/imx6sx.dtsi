@@ -1428,8 +1428,13 @@
 				status = "okay";
 			};
 
-			rpmsg: rpmsg{
-				compatible = "fsl,imx6sx-rpmsg";
+			mcctest: mcctest{
+				compatible = "fsl,imx6sx-mcc-test";
+				status = "disabled";
+			};
+
+			mcctty: mcctty{
+				compatible = "fsl,imx6sx-mcc-tty";
 				status = "disabled";
 			};
 
