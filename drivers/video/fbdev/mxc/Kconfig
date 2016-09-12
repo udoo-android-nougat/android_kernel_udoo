@@ -81,6 +81,10 @@ config HANNSTAR_CABC
 	  display panel automatically according to the content
 	  shown on the panel.
 
+config FB_MXS_TDA19988
+	tristate "UDOO TDA19988 HDMI Interface Chip"
+	depends on FB_MXS && I2C
+
 config FB_MXC_EINK_PANEL
 	depends on FB_MXC
 	depends on DMA_ENGINE

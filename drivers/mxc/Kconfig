@@ -11,10 +11,6 @@ config MXC_IPU
 	  If you plan to use the Image Processing unit, say
 	  Y here. IPU is needed by Framebuffer and V4L2 drivers.
 
-config FB_MXS_TDA19988
-	tristate "UDOO TDA19988 HDMI Interface Chip"
-	depends on FB_MXS && I2C
-
 source "drivers/mxc/mlb/Kconfig"
 source "drivers/mxc/ipu3/Kconfig"
 source "drivers/mxc/gpu-viv/Kconfig"
