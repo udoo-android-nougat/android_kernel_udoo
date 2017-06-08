@@ -339,14 +339,6 @@ static inline void imx6q_enet_init(void)
 }
 
 
-/* Add auxdata to pass platform data */
-static const struct of_dev_auxdata imx6q_auxdata_lookup[] __initconst = {
-	OF_DEV_AUXDATA("fsl,imx6q-flexcan", 0x02090000, NULL, &flexcan_pdata[0]),
-	OF_DEV_AUXDATA("fsl,imx6q-flexcan", 0x02094000, NULL, &flexcan_pdata[1]),
-	OF_DEV_AUXDATA("fsl,imx6q-fec", 0x02188000, NULL, &fec_pdata),
-	{ /* sentinel */ }
-};
-
 static const struct apx_wdog_trigger_data apx_wdt_a62 __initconst = {
 	.gpio_trg__iomux_ctrl   = 0x020e00b8,
 	.gpio_trg__pad_ctrl     = 0x20e03cc,
