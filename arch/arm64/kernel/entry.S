@@ -160,13 +160,11 @@ alternative_else_nop_endif
 	*/
 	.endm
 
-	.macro	kernel_exit, el
+	.macro	kernel_exit, el, ret = 0
 	.if	\el != 0
 	/* Restore the task's original addr_limit. */
 	ldr	x20, [sp, #S_ORIG_ADDR_LIMIT]
 	str	x20, [tsk, #TI_ADDR_LIMIT]
-
-	/* No need to restore UAO, it will be restored from SPSR_EL1 */
 	.endif
 
 	ldp	x21, x22, [sp, #S_PC]		// load ELR, SPSR
