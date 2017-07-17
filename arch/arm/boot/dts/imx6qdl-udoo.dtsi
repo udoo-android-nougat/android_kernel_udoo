@@ -19,7 +19,7 @@
 / {
 	aliases {
 		mxcfb0 = &mxcfb1;
-    mxcfb1 = &mxcfb2;
+		mxcfb1 = &mxcfb2;
 		mmc0 = &usdhc3;
 		mmc1 = &usdhc2;
 		mmc2 = &usdhc1;
@@ -131,6 +131,14 @@
 		compatible = "udoo,poweroff";
 		pwr_5v_gpio = <&gpio2 4 GPIO_ACTIVE_LOW>;
 	};
+  
+  mxcfb1: fb@0 {
+  	status = "disabled";
+  };
+    
+  mxcfb2: fb@0 {
+  	status = "disabled";
+  };
 };
 
 &audmux { 
@@ -190,10 +198,6 @@
 		primary;
 		crtc = "ipu1-di0";
 	};
-};
-
-&mxcfb2 {
-	status = "disabled";
 };
 
 &i2c2 { // internal (hdmi)
