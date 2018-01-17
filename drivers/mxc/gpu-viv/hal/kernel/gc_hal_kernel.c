@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -70,7 +70,7 @@ const char * _VERSION = "\n\0$VERSION$"
                         gcmTXT2STR(gcvVERSION_MAJOR) "."
                         gcmTXT2STR(gcvVERSION_MINOR) "."
                         gcmTXT2STR(gcvVERSION_PATCH) ":"
-                        gcmTXT2STR(gcvVERSION_BUILD) "$\n";
+                        gcmTXT2STR(gcvVERSION_BUILD) "+fslc$\n";
 
 /******************************************************************************\
 ******************************* gckKERNEL API Code ******************************
@@ -318,7 +318,7 @@ _DumpDriverConfigure(
     gcmkPRINT_N(0, "***   GPU DRV CONFIG   ***\n");
     gcmkPRINT_N(0, "**************************\n");
 
-    gcmkPRINT("Galcore version %d.%d.%d.%d\n",
+    gcmkPRINT("Galcore version %d.%d.%d.%d+fslc\n",
               gcvVERSION_MAJOR, gcvVERSION_MINOR, gcvVERSION_PATCH, gcvVERSION_BUILD);
 
     gckOS_DumpParam();
@@ -570,8 +570,6 @@ gckKERNEL_Construct(
                         : gcdGPU_TIMEOUT
                         ;
 
-        /* Initialize virtual command buffer. */
-        /* TODO: Remove platform limitation after porting. */
 #if (defined(LINUX) || defined(__QNXNTO__)) && !defined(EMULATOR) && !gcdALLOC_CMD_FROM_RESERVE
         kernel->virtualCommandBuffer = gcvTRUE;
 #else
@@ -626,7 +624,6 @@ gckKERNEL_Construct(
             /* Construct gckEVENT for BLT. */
             gcmkONERROR(gckEVENT_Construct(kernel, &kernel->asyncEvent));
 
-            /* TODO: Need a decent interface to connect event and command object. */
             kernel->asyncEvent->asyncCommand = kernel->asyncCommand;
 
             kernel->command->asyncCommand = kernel->asyncCommand;
@@ -841,20 +838,6 @@ gckKERNEL_Destroy(
     else
 #endif
     {
-        if (Kernel->mmu)
-        {
-#if gcdSHARED_PAGETABLE
-            /* Destroy the gckMMU object. */
-            gcmkVERIFY_OK(gckMMU_Destroy(Kernel->mmu));
-#else
-            if (Kernel->mmu->hardware == Kernel->hardware)
-            {
-                /* Destroy the gckMMU object. */
-                gcmkVERIFY_OK(gckMMU_Destroy(Kernel->mmu));
-            }
-#endif
-        }
-
         if (Kernel->command)
         {
             /* Destroy the gckCOMMNAND object. */
@@ -875,6 +858,22 @@ gckKERNEL_Destroy(
         {
             /* Destroy the gckEVENT object. */
             gcmkVERIFY_OK(gckEVENT_Destroy(Kernel->eventObj));
+        }
+
+        gcmkVERIFY_OK(gckHARDWARE_DestroyFunctions(Kernel->hardware));
+
+        if (Kernel->mmu)
+        {
+#if gcdSHARED_PAGETABLE
+            /* Destroy the gckMMU object. */
+            gcmkVERIFY_OK(gckMMU_Destroy(Kernel->mmu));
+#else
+            if (Kernel->mmu->hardware == Kernel->hardware)
+            {
+                /* Destroy the gckMMU object. */
+                gcmkVERIFY_OK(gckMMU_Destroy(Kernel->mmu));
+            }
+#endif
         }
 
         if (Kernel->hardware)
@@ -1922,9 +1921,7 @@ gckKERNEL_Dispatch(
     {
     case gcvHAL_GET_BASE_ADDRESS:
         /* Get base address. */
-        gcmkONERROR(
-            gckHARDWARE_GetBaseAddress(kernel->hardware, &Interface->u.GetBaseAddress.baseAddress));
-
+        Interface->u.GetBaseAddress.baseAddress = Kernel->hardware->baseAddress;
         Interface->u.GetBaseAddress.flatMappingStart = Kernel->mmu->flatMappingStart;
         Interface->u.GetBaseAddress.flatMappingEnd = Kernel->mmu->flatMappingEnd;
         break;
@@ -2739,7 +2736,7 @@ gckKERNEL_Dispatch(
         Interface->u.Version.build = gcvVERSION_BUILD;
 #if gcmIS_DEBUG(gcdDEBUG_TRACE)
         gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_KERNEL,
-                       "KERNEL version %d.%d.%d build %u",
+                       "KERNEL version %d.%d.%d build %u (fslc)",
                        gcvVERSION_MAJOR, gcvVERSION_MINOR,
                        gcvVERSION_PATCH, gcvVERSION_BUILD);
 #endif
@@ -2802,11 +2799,6 @@ gckKERNEL_Dispatch(
         gcmkONERROR(
             gckEVENT_Compose(Kernel->eventObj,
                              &Interface->u.Compose));
-        break;
-
-    case gcvHAL_SET_TIMEOUT:
-         /* set timeOut value from user */
-         gckKERNEL_SetTimeOut(Kernel, Interface->u.SetTimeOut.timeOut);
         break;
 
     case gcvHAL_GET_FRAME_INFO:
@@ -4069,19 +4061,6 @@ OnError:
     return status;
 }
 
-void
-gckKERNEL_SetTimeOut(
-    IN gckKERNEL Kernel,
-    IN gctUINT32 timeOut
-    )
-{
-    gcmkHEADER_ARG("Kernel=0x%x timeOut=%d", Kernel, timeOut);
-#if gcdGPU_TIMEOUT
-    Kernel->timeOut = timeOut;
-#endif
-    gcmkFOOTER_NO();
-}
-
 gceSTATUS
 gckKERNEL_AllocateVirtualCommandBuffer(
     IN gckKERNEL Kernel,
@@ -4223,7 +4202,7 @@ gckKERNEL_AllocateVirtualMemory(
     gctSIZE_T pageCount;
     gctSIZE_T bytes                      = *Bytes;
     gckVIRTUAL_BUFFER_PTR buffer         = gcvNULL;
-    gckMMU mmu;
+    gckMMU mmu                           = gcvNULL;
     gctUINT32 flag = gcvALLOC_FLAG_NON_CONTIGUOUS;
 
     gcmkHEADER_ARG("Os=0x%X InUserSpace=%d *Bytes=%lu",
@@ -4373,13 +4352,8 @@ gckKERNEL_AllocateVirtualMemory(
 OnError:
     if (buffer && buffer->gpuAddress)
     {
-#if gcdPROCESS_ADDRESS_SPACE
         gcmkVERIFY_OK(
             gckMMU_FreePages(mmu, gcvFALSE, buffer->gpuAddress, buffer->pageTable, buffer->pageCount));
-#else
-        gcmkVERIFY_OK(
-            gckMMU_FreePages(Kernel->mmu, gcvFALSE, buffer->gpuAddress, buffer->pageTable, buffer->pageCount));
-#endif
     }
 
     if (NonPaged && buffer->physical)
@@ -5292,7 +5266,7 @@ gckKERNEL_WriteShBuffer(
     )
 {
     gceSTATUS status;
-    gcsSHBUF_PTR shBuf;
+    gcsSHBUF_PTR shBuf = gcvNULL;
     gctBOOL acquired = gcvFALSE;
 
     gcmkHEADER_ARG("Kernel=0x%X ShBuf=%u UserData=0x%X ByteCount=%u",
@@ -5347,6 +5321,12 @@ gckKERNEL_WriteShBuffer(
     return gcvSTATUS_OK;
 
 OnError:
+    if (shBuf && shBuf->data)
+    {
+        gcmkOS_SAFE_FREE(Kernel->os, shBuf->data);
+        shBuf->data = gcvNULL;
+    }
+
     if (acquired)
     {
         /* Release the mutex. */
@@ -5554,7 +5534,7 @@ gckFENCE_Create(
     gctSIZE_T pageSize = 4096;
 
     gcmkONERROR(gckOS_Allocate(Os, gcmSIZEOF(gcsFENCE), (gctPOINTER *)&fence));
-
+    gcmkONERROR(gckOS_ZeroMemory(fence, gcmSIZEOF(gcsFENCE)));
     gcmkONERROR(gckOS_CreateMutex(Os, (gctPOINTER *)&fence->mutex));
 
     fence->kernel = Kernel;
@@ -5632,12 +5612,10 @@ gckFENCE_Destory(
 #if USE_KERNEL_VIRTUAL_BUFFERS
         if (Fence->kernel->virtualCommandBuffer)
         {
-            gckVIRTUAL_COMMAND_BUFFER_PTR    buffer = (gckVIRTUAL_COMMAND_BUFFER_PTR)Fence->physical;
-
             gcmkVERIFY_OK(gckKERNEL_FreeVirtualMemory(
                 Fence->physical,
                 Fence->logical,
-                gcvTRUE
+                gcvFALSE
                 ));
         }
         else
@@ -5764,7 +5742,7 @@ gckDEVICE_AddCore(
 
     gcmkASSERT(Device->coreNum < gcvCORE_COUNT);
 
-    if (Core >= gcvCORE_MAJOR && Core <= gcvCORE_3D3)
+    if (Core >= gcvCORE_MAJOR && Core <= gcvCORE_3D_MAX)
     {
         /* Chip ID is only used for 3D cores. */
         if (ChipID == gcvCHIP_ID_DEFAULT)
@@ -5878,10 +5856,10 @@ gckDEVICE_Destroy(
     IN gckDEVICE Device
     )
 {
-    gctUINT i;
+    gctINT i;
     gcsCORE_INFO * info = Device->coreInfoArray;
 
-    for (i = 0; i < Device->coreNum; i++)
+    for (i = Device->coreNum - 1; i >= 0 ; i--)
     {
         if (info[i].kernel != gcvNULL)
         {
@@ -5903,6 +5881,32 @@ gckDEVICE_Destroy(
     return gcvSTATUS_OK;
 }
 
+static gceSTATUS
+gckDEVICE_SetTimeOut(
+    IN gckDEVICE Device,
+    IN gcsHAL_INTERFACE_PTR Interface
+    )
+{
+#if gcdGPU_TIMEOUT
+    gckKERNEL kernel;
+    gctUINT i;
+    gceHARDWARE_TYPE type = Interface->hardwareType;
+    gcsCORE_LIST *coreList;
+
+    coreList = &Device->map[type];
+
+    for (i = 0; i < coreList->num; i++)
+    {
+        kernel = coreList->kernels[i];
+
+        kernel->timeOut = Interface->u.SetTimeOut.timeOut;
+    }
+#endif
+
+    return gcvSTATUS_OK;
+}
+
+
 gceSTATUS
 gckDEVICE_Dispatch(
     IN gckDEVICE Device,
@@ -5922,6 +5926,10 @@ gckDEVICE_Dispatch(
 
     case gcvHAL_VERSION:
         status = gckDEVICE_Version(Device, Interface);
+        break;
+
+    case gcvHAL_SET_TIMEOUT:
+        status = gckDEVICE_SetTimeOut(Device, Interface);
         break;
 
     default:

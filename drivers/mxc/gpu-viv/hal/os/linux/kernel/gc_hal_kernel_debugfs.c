@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -215,7 +215,14 @@ gc_debugfs_write(
 
     if (info->write)
     {
-        info->write(buf, count, node);
+        char tmpbuf[256] = {0};
+
+        if (count >= sizeof(tmpbuf) || copy_from_user(tmpbuf, buf, count) > 0)
+        {
+            return 0;
+        }
+
+        info->write(tmpbuf, count, node);
     }
 
     return count;
@@ -269,7 +276,6 @@ gckDEBUGFS_DIR_CreateFiles(
         node->info   = &List[i];
         node->device = Data;
 
-        /* Bind to a file. TODO: clean up when fail. */
         node->entry = debugfs_create_file(
             List[i].name, S_IRUGO|S_IWUSR, Dir->root, node, &gc_debugfs_operations);
 

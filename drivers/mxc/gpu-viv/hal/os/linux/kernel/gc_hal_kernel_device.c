@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -72,7 +72,7 @@
 
 static gckGALDEVICE galDevice;
 
-extern gcTA globalTA;
+extern gcTA globalTA[16];
 
 /******************************************************************************\
 ******************************** Debugfs Support *******************************
@@ -500,7 +500,7 @@ gc_version_show(struct seq_file *m, void *data)
     gcsPLATFORM * platform = device->platform;
     gctCONST_STRING name;
 
-    seq_printf(m, "%s built at %s\n",  gcvVERSION_STRING, HOST);
+    seq_printf(m, "%s+fslc built at %s\n",  gcvVERSION_STRING, HOST);
 
     if (platform->ops->name)
     {
@@ -833,6 +833,7 @@ _SetupVidMem(
 
                     if (gcmIS_SUCCESS(status))
                     {
+                        device->contiguousRequested = gcvTRUE;
                         device->requestedContiguousBase = physAddr;
                         break;
                     }
@@ -1303,13 +1304,14 @@ gckGALDEVICE_Construct(
     if (device->irqLines[gcvCORE_MAJOR] != -1)
     {
         gcmkONERROR(gctaOS_ConstructOS(device->os, &device->taos));
-        gcmkONERROR(gcTA_Construct(device->taos, &globalTA));
     }
 
     gcmkONERROR(_SetupVidMem(device, ContiguousBase, ContiguousSize, BankSize, Args));
 
     if (device->irqLines[gcvCORE_MAJOR] != -1)
     {
+        gcmkONERROR(gcTA_Construct(device->taos, gcvCORE_MAJOR, &globalTA[gcvCORE_MAJOR]));
+
         gcmkONERROR(gckDEVICE_AddCore(device->device, gcvCORE_MAJOR, Args->chipIDs[gcvCORE_MAJOR], device, &device->kernels[gcvCORE_MAJOR]));
 
         /* Setup the ISR manager. */
@@ -1406,7 +1408,21 @@ gckGALDEVICE_Construct(
     {
         if (Args->irqs[i] != -1)
         {
+            gcmkONERROR(gcTA_Construct(device->taos, (gceCORE)i, &globalTA[i]));
             gckDEVICE_AddCore(device->device, i, Args->chipIDs[i], device, &device->kernels[i]);
+
+            gcmkONERROR(
+            gckHARDWARE_SetFastClear(device->kernels[i]->hardware,
+                 FastClear,
+                Compression));
+
+            gcmkONERROR(gckHARDWARE_SetPowerManagement(
+                device->kernels[i]->hardware, PowerManagement
+                ));
+
+            gcmkONERROR(gckHARDWARE_SetGpuProfiler(
+                device->kernels[i]->hardware, GpuProfiler
+                ));
         }
     }
 
@@ -1702,13 +1718,17 @@ gckGALDEVICE_Destroy(
         if (Device->device)
         {
             gcmkVERIFY_OK(gckDEVICE_Destroy(Device->os, Device->device));
-            Device->device = gcvNULL;
-        }
 
-        if (globalTA)
-        {
-            gcTA_Destroy(globalTA);
-            globalTA = gcvNULL;
+            for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+            {
+                if (globalTA[i])
+                {
+                    gcTA_Destroy(globalTA[i]);
+                    globalTA[i] = gcvNULL;
+                }
+            }
+
+            Device->device = gcvNULL;
         }
 
         if (Device->taos)

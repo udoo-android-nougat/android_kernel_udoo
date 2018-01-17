@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -61,12 +61,13 @@
 #include "gc_hal_driver.h"
 
 #include <linux/platform_device.h>
+#include <linux/component.h>
 
 /* Zone used for header/footer. */
 #define _GC_OBJ_ZONE    gcvZONE_DRIVER
 
 MODULE_DESCRIPTION("Vivante Graphics Driver");
-MODULE_LICENSE("GPL");
+MODULE_LICENSE("Dual MIT/GPL");
 
 static struct class* gpuClass;
 
@@ -282,7 +283,7 @@ gckOS_DumpParam(
     printk("  registerMemSizeDEC300 = 0x%08lX\n", registerMemSizeDEC300);
 #endif
 
-    printk("  contiguousSize    = %ld\n",     contiguousSize);
+    printk("  contiguousSize    = 0x%08lX\n", contiguousSize);
     printk("  contiguousBase    = 0x%08lX\n", contiguousBase);
     printk("  bankSize          = 0x%08lX\n", bankSize);
     printk("  fastClear         = %d\n",      fastClear);
@@ -1036,7 +1037,35 @@ static void drv_exit(void)
 
     gcmkFOOTER_NO();
 }
+static int gpu_platform_bind(struct device *dev)
+{
+	int ret;
 
+	ret = component_bind_all(dev, 0);
+	if (ret < 0) {
+		return ret;
+    }
+
+    ret = drv_init();
+    if (!ret)  {
+        platform_set_drvdata(to_platform_device(dev), galDevice);
+
+        return ret;
+    }
+	component_unbind_all(dev, 0);
+	return ret;
+}
+
+static void gpu_platform_unbind(struct device *dev)
+{
+	component_unbind_all(dev, 0);
+}
+
+extern struct component_match *match;
+static const struct component_master_ops gpu_platform_master_ops = {
+	.bind = gpu_platform_bind,
+	.unbind = gpu_platform_unbind,
+};
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 8, 0)
 static int gpu_probe(struct platform_device *pdev)
 #else
@@ -1099,15 +1128,22 @@ static int __devinit gpu_probe(struct platform_device *pdev)
         /* Update module param because drv_init() uses them directly. */
         _UpdateModuleParam(&moduleParam);
     }
-
-    ret = drv_init();
-
-    if (!ret)
-    {
-        platform_set_drvdata(pdev, galDevice);
-
-        gcmkFOOTER_NO();
-        return ret;
+    if (platform.ops->registerDevice) {
+        /*drv_init() will be called during binding*/
+        ret = component_master_add_with_match(&pdev->dev, &gpu_platform_master_ops, match);
+        if(ret !=0)
+        {
+            gcmkFOOTER_NO();
+            return ret;
+        }
+    }
+    else {
+        ret = drv_init();
+        if (!ret) {
+            platform_set_drvdata(pdev, galDevice);
+            gcmkFOOTER_NO();
+            return ret;
+        }
     }
 
     gcmkFOOTER_ARG(KERN_INFO "Failed to register gpu driver: %d\n", ret);
@@ -1128,7 +1164,9 @@ static int __devexit gpu_remove(struct platform_device *pdev)
     {
         platform.ops->putPower(&platform);
     }
-
+    if (platform.ops->registerDevice) {
+        component_master_del(&pdev->dev, &gpu_platform_master_ops);
+    }
     gcmkFOOTER_NO();
     return 0;
 }
@@ -1165,6 +1203,17 @@ static int gpu_suspend(struct platform_device *dev, pm_message_t state)
             if (gcmIS_ERROR(status))
             {
                 return -1;
+            }
+
+#if gcdENABLE_VG
+            if (i == gcvCORE_VG)
+            {
+                status = gckVGHARDWARE_SetPowerManagementState(device->kernels[i]->vg->hardware, gcvPOWER_ON);
+            }
+            else
+#endif
+            {
+                status = gckHARDWARE_SetPowerManagementState(device->kernels[i]->hardware, gcvPOWER_ON);
             }
 
 #if gcdENABLE_VG
@@ -1358,6 +1407,14 @@ static int __init gpu_init(void)
         platform.ops->adjustDriver(&platform);
     }
 
+    if (platform.ops->registerDevice)
+    {
+        ret = platform.ops->registerDevice(&platform);
+        if (ret != 0) {
+            goto out;
+        }
+    }
+
     ret = platform_driver_register(&gpu_driver);
     if (!ret)
     {
@@ -1375,6 +1432,11 @@ out:
 static void __exit gpu_exit(void)
 {
     platform_driver_unregister(&gpu_driver);
+
+    if (platform.ops->unRegisterDevice)
+    {
+        platform.ops->unRegisterDevice(&platform);
+    }
 
     if (platform.ops->needAddDevice
      && platform.ops->needAddDevice(&platform))

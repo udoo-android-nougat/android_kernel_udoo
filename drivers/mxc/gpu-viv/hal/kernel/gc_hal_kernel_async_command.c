@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -55,7 +55,6 @@
 
 #include "gc_hal_kernel_precomp.h"
 #include "gc_hal_kernel_context.h"
-#include <asm/uaccess.h>
 
 #define _GC_OBJ_ZONE            gcvZONE_ASYNC_COMMAND
 
@@ -249,12 +248,9 @@ gckASYNC_COMMAND_Commit(
     gctUINT32       pipeBytes;
     gctUINT32       fenceBytes;
     gctBOOL         needCopy;
-    gctUINT32       __ua_flags;
     gcmkHEADER();
 
-    __ua_flags = uaccess_save_and_enable();
     gckHARDWARE_PipeSelect(Command->hardware, gcvNULL, gcvPIPE_3D, &pipeBytes);
-    uaccess_restore(__ua_flags);
 
     gckOS_QueryNeedCopy(Command->os, 0, &needCopy);
 

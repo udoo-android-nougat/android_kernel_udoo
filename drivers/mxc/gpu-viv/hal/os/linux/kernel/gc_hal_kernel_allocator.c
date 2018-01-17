@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -502,7 +502,6 @@ static const struct file_operations default_fops = {
 /***************************************************************************\
 ************************ Default Allocator **********************************
 \***************************************************************************/
-#define C_MAX_PAGENUM  (50*1024)
 static gceSTATUS
 _DefaultAlloc(
     IN gckALLOCATOR Allocator,
@@ -514,7 +513,7 @@ _DefaultAlloc(
     gceSTATUS status;
     gctUINT i;
     gctBOOL contiguous = Flags & gcvALLOC_FLAG_CONTIGUOUS;
-#ifdef CONFIG_GPU_LOW_MEMORY_KILLER
+#ifdef gcdSYS_FREE_MEMORY_LIMIT
     struct sysinfo temsysinfo;
 #endif
 
@@ -523,12 +522,12 @@ _DefaultAlloc(
 
     gcmkHEADER_ARG("Mdl=%p NumPages=%zu Flags=0x%x", Mdl, NumPages, Flags);
 
-#ifdef CONFIG_GPU_LOW_MEMORY_KILLER
+#ifdef gcdSYS_FREE_MEMORY_LIMIT
     si_meminfo(&temsysinfo);
 
     if (Flags & gcvALLOC_FLAG_MEMLIMIT)
     {
-        if ( (temsysinfo.freeram < NumPages) || ((temsysinfo.freeram-NumPages) < C_MAX_PAGENUM) )
+        if ( (temsysinfo.freeram < NumPages) || ((temsysinfo.freeram-NumPages) < gcdSYS_FREE_MEMORY_LIMIT) )
         {
             gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
         }
@@ -931,7 +930,7 @@ _DefaultAlloctorInit(
     )
 {
     gceSTATUS status;
-    gckALLOCATOR allocator;
+    gckALLOCATOR allocator = gcvNULL;
     gcsDEFAULT_PRIV_PTR priv = gcvNULL;
 
     gcmkONERROR(
@@ -967,6 +966,10 @@ _DefaultAlloctorInit(
     return gcvSTATUS_OK;
 
 OnError:
+    if (allocator)
+    {
+        gcmkOS_SAFE_FREE(Os, allocator);
+    }
     return status;
 }
 

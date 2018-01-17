@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -70,6 +70,7 @@
 typedef struct _gcsCMA_PRIV * gcsCMA_PRIV_PTR;
 typedef struct _gcsCMA_PRIV {
     gctUINT32 cmasize;
+    gctBOOL cmaLimitRequest;
 }
 gcsCMA_PRIV;
 
@@ -141,12 +142,17 @@ _CMAFSLAlloc(
 
     gcmkHEADER_ARG("Mdl=%p NumPages=%d", Mdl, NumPages);
 
-#if IMX8_CMA_LIMIT
-    if (!(Flags & gcvALLOC_FLAG_CMA_LIMIT))
+    if (os->allocatorLimitMarker)
     {
-        gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
+        if (Flags & gcvALLOC_FLAG_CMA_LIMIT)
+        {
+            priv->cmaLimitRequest = gcvTRUE;
+        }
+        else if (priv->cmaLimitRequest == gcvTRUE)
+        {
+            gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
+        }
     }
-#endif
 
     gcmkONERROR(gckOS_Allocate(os, sizeof(struct mdl_cma_priv), (gctPOINTER *)&mdl_priv));
     mdl_priv->kvaddr = gcvNULL;
@@ -162,6 +168,7 @@ _CMAFSLAlloc(
     }
 
     Mdl->priv = mdl_priv;
+    Mdl->dmaHandle = mdl_priv->physical;
     priv->cmasize += NumPages * PAGE_SIZE;
 
     gcmkFOOTER_NO();
@@ -213,7 +220,7 @@ _CMAFSLMapUser(
                     0L,
                     mdl->numPages * PAGE_SIZE,
                     PROT_READ | PROT_WRITE,
-                    MAP_SHARED,
+                    MAP_SHARED | MAP_NORESERVE,
                     0);
 #else
     down_write(&current->mm->mmap_sem);
@@ -418,7 +425,7 @@ _CMAFSLAlloctorInit(
     )
 {
     gceSTATUS status;
-    gckALLOCATOR allocator;
+    gckALLOCATOR allocator = gcvNULL;
     gcsCMA_PRIV_PTR priv = gcvNULL;
 
     gcmkONERROR(
@@ -440,15 +447,27 @@ _CMAFSLAlloctorInit(
 
     allocator->capability = gcvALLOC_FLAG_CONTIGUOUS;
 
-#if IMX8_CMA_LIMIT
-    allocator->capability |= gcvALLOC_FLAG_CMA_LIMIT;
+#if defined(CONFIG_ARM64)
+    Os->allocatorLimitMarker = (Os->device->baseAddress + totalram_pages * PAGE_SIZE) > 0x100000000;
+#else
+    Os->allocatorLimitMarker = gcvFALSE;
 #endif
+    priv->cmaLimitRequest = gcvFALSE;
+
+    if (Os->allocatorLimitMarker)
+    {
+        allocator->capability |= gcvALLOC_FLAG_CMA_LIMIT;
+    }
 
     *Allocator = allocator;
 
     return gcvSTATUS_OK;
 
 OnError:
+    if (allocator)
+    {
+        gcmkOS_SAFE_FREE(Os, allocator);
+    }
     return status;
 }
 

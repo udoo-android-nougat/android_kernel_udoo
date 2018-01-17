@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -52,7 +52,7 @@
 *
 *****************************************************************************/
 
-#include <asm/uaccess.h>
+
 #include "gc_hal_kernel_precomp.h"
 #include "gc_hal_kernel_context.h"
 
@@ -882,6 +882,7 @@ _ProcessUserCommandBufferList(
 
     struct _gcoCMDBUF   _commandBufferObject;
     gcoCMDBUF           currentCMDBUF;
+    struct _gcoCMDBUF   _nextCMDBUF;
     gcoCMDBUF           currentCMDBUFUser = CommandBufferListHead;
 
     gckOS_QueryNeedCopy(Command->os, 0, &needCopy);
@@ -901,10 +902,9 @@ _ProcessUserCommandBufferList(
     {
         gcoCMDBUF           nextCMDBUFUser;
         gcoCMDBUF           nextCMDBUF;
-        struct _gcoCMDBUF   _nextCMDBUF;
         gctUINT8_PTR        fenceLogical = gcvNULL;
         gctUINT8_PTR        linkLogical;
-        gctUINT32           linkBytes;
+        gctUINT32           linkBytes = 8;
         gctUINT32           linkLow;
         gctUINT32           linkHigh;
 
@@ -947,7 +947,7 @@ _ProcessUserCommandBufferList(
             /* Fill NOPs in space reserved for fence. */
             while (i--)
             {
-                gctSIZE_T nopBytes;
+                gctSIZE_T nopBytes = 8;
                 gcmkONERROR(gckHARDWARE_Nop(Command->kernel->hardware, fenceLogical, &nopBytes));
                 fenceLogical += nopBytes;
             }
@@ -1835,7 +1835,6 @@ gckCOMMAND_Commit(
 #endif
 
     gctPOINTER pointer = gcvNULL;
-    gctUINT32  __ua_flags;
 
     gcmkHEADER_ARG(
         "Command=0x%x CommandBuffer=0x%x ProcessID=%d",
@@ -1884,9 +1883,7 @@ gckCOMMAND_Commit(
     if ((Context != gcvNULL) && (Command->currContext != Context))
     {
         /* Yes, merge in the deltas. */
-        __ua_flags = uaccess_save_and_enable();
         gckCONTEXT_Update(Context, ProcessID, StateDelta);
-        uaccess_restore(__ua_flags);
 
         /* Update the current context. */
         Command->currContext = Context;
@@ -1930,11 +1927,9 @@ gckCOMMAND_Commit(
         ));
 
     /* Query the size of pipe select command sequence. */
-    __ua_flags = uaccess_save_and_enable();
     gcmkONERROR(gckHARDWARE_PipeSelect(
         hardware, gcvNULL, gcvPIPE_3D, &pipeBytes
         ));
-    uaccess_restore(__ua_flags);
 
     /* Query the size of LINK command. */
     gcmkONERROR(gckHARDWARE_Link(
@@ -1976,13 +1971,6 @@ gckCOMMAND_Commit(
             ));
     }
 
-    /* Get the physical address. */
-    gcmkONERROR(gckOS_UserLogicalToPhysical(
-        Command->os,
-        commandBufferLogical,
-        &commandBufferPhysical
-        ));
-
 #ifdef __QNXNTO__
     userCommandBufferLogical = (gctPOINTER) commandBufferLogical;
 
@@ -1995,6 +1983,19 @@ gckCOMMAND_Commit(
     commandBufferLogical = pointer;
 
     userCommandBufferLogicalMapped = gcvTRUE;
+
+    gcmkONERROR(gckOS_GetPhysicalAddress(
+        Command->os,
+        commandBufferLogical,
+        &commandBufferPhysical
+        ));
+#else
+    /* Get the physical address. */
+    gcmkONERROR(gckOS_UserLogicalToPhysical(
+        Command->os,
+        commandBufferLogical,
+        &commandBufferPhysical
+        ));
 #endif
 
     commandBufferSize
@@ -2065,14 +2066,12 @@ gckCOMMAND_Commit(
         {
             /* The current hardware and the entry command buffer pipes
             ** are different, switch to the correct pipe. */
-            __ua_flags = uaccess_save_and_enable();
             gcmkONERROR(gckHARDWARE_PipeSelect(
                 Command->kernel->hardware,
                 commandBufferLogical,
                 commandBufferObject->entryPipe,
                 &pipeBytes
                 ));
-            uaccess_restore(__ua_flags);
 
             /* Do not skip pipe switching sequence. */
             offset = 0;
@@ -2098,9 +2097,7 @@ gckCOMMAND_Commit(
         contextBuffer = Context->buffer;
 
         /* Yes, merge in the deltas. */
-        __ua_flags = uaccess_save_and_enable();
         gcmkONERROR(gckCONTEXT_Update(Context, ProcessID, StateDelta));
-        uaccess_restore(__ua_flags);
 
         contextSwitched = gcvTRUE;
 
@@ -2136,14 +2133,12 @@ gckCOMMAND_Commit(
         {
             /* The current hardware and the initial context pipes are
                 different, switch to the correct pipe. */
-            __ua_flags = uaccess_save_and_enable();
             gcmkONERROR(gckHARDWARE_PipeSelect(
                 Command->kernel->hardware,
                 commandBufferLogical,
                 commandBufferObject->entryPipe,
                 &pipeBytes
                 ));
-            uaccess_restore(__ua_flags);
 
             /* Do not skip pipe switching sequence. */
             offset = 0;
@@ -2214,14 +2209,12 @@ gckCOMMAND_Commit(
         {
             /* The current hardware and the entry command buffer pipes
             ** are different, switch to the correct pipe. */
-            __ua_flags = uaccess_save_and_enable();
             gcmkONERROR(gckHARDWARE_PipeSelect(
                 Command->kernel->hardware,
                 commandBufferLogical,
                 commandBufferObject->entryPipe,
                 &pipeBytes
                 ));
-            uaccess_restore(__ua_flags);
 
             /* Do not skip pipe switching sequence. */
             offset = 0;
@@ -2560,6 +2553,19 @@ gckCOMMAND_Commit(
     gcmkONERROR(gckCOMMAND_ExitCommit(Command, gcvFALSE));
     commitEntered = gcvFALSE;
 
+    if  ((Command->kernel->hardware->gpuProfiler == gcvTRUE) &&
+         (Command->kernel->profileEnable == gcvTRUE) &&
+         (Command->kernel->profileSyncMode == gcvTRUE))
+    {
+        gcmkONERROR(gckCOMMAND_Stall(Command, gcvTRUE));
+
+        if (Command->currContext)
+        {
+            gcmkONERROR(gckHARDWARE_UpdateContextNewProfile(
+                        hardware,
+                        Command->currContext));
+        }
+    }
 
     /* Loop while there are records in the queue. */
     while (EventQueue != gcvNULL)
@@ -2606,11 +2612,8 @@ gckCOMMAND_Commit(
         EventQueue = nextEventRecord;
     }
 
-    if ((Command->kernel->eventObj->queueHead == gcvNULL
+    if (Command->kernel->eventObj->queueHead == gcvNULL
       && Command->kernel->hardware->powerManagement == gcvTRUE)
-    || (Command->kernel->hardware->gpuProfiler == gcvTRUE
-      && Command->kernel->profileEnable == gcvTRUE)
-    )
     {
         /* Commit done event by which work thread knows all jobs done. */
         gcmkVERIFY_OK(

@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -54,7 +54,6 @@
 
 
 #include "gc_hal_kernel_precomp.h"
-#include <asm/uaccess.h>
 
 #if gcdENABLE_VG
 
@@ -285,7 +284,6 @@ gceSTATUS gckVGKERNEL_Dispatch(
     gctPHYS_ADDR physical = gcvNULL;
     gctPOINTER logical = gcvNULL;
     gctSIZE_T bytes = 0;
-    gctUINT32 __ua_flags;
 
     gcmkHEADER_ARG("Kernel=0x%x Interface=0x%x ", Kernel, Interface);
 
@@ -498,7 +496,6 @@ gceSTATUS gckVGKERNEL_Dispatch(
 
     case gcvHAL_COMMIT:
         /* Commit a command and context buffer. */
-        __ua_flags = uaccess_save_and_enable();
         gcmkERR_BREAK(gckVGCOMMAND_Commit(
             Kernel->vg->command,
             gcmUINT64_TO_PTR(kernelInterface->u.VGCommit.context),
@@ -506,7 +503,6 @@ gceSTATUS gckVGKERNEL_Dispatch(
             kernelInterface->u.VGCommit.entryCount,
             gcmUINT64_TO_PTR(kernelInterface->u.VGCommit.taskTable)
             ));
-        uaccess_restore(__ua_flags);
         break;
 
     case gcvHAL_GET_BASE_ADDRESS:

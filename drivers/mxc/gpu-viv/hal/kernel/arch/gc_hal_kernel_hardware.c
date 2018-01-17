@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -1320,6 +1320,14 @@ _QueryFeatureDatabase(
         available = database->NEW_GPIPE;
         break;
 
+    case gcvFEATURE_MULTI_CORE_BLOCK_SET_CONFIG2:
+        available = database->MULTI_CORE_BLOCK_SET_CONFIG2;
+        break;
+
+    case gcvFEATURE_SECURITY_AHB:
+        available = database->SECURITY_AHB;
+        break;
+
     default:
         gcmkFATAL("Invalid feature has been requested.");
         available = gcvFALSE;
@@ -1555,6 +1563,8 @@ gckHARDWARE_Construct(
     /* Identify the hardware. */
     gcmkONERROR(_IdentifyHardwareByDatabase(hardware, Os, Core, &hardware->identity));
 
+    hardware->mmuVersion = gckHARDWARE_IsFeatureAvailable(hardware, gcvFEATURE_MMU);
+
     /* Get the system's physical base address for old MMU */
     if (hardware->mmuVersion == 0)
     {
@@ -1584,13 +1594,17 @@ gckHARDWARE_Construct(
             ? 0x0100
             : 0x0000;
 
-    /* _ResetGPU need powerBaseAddress. */
-    status = _ResetGPU(hardware, Os, Core);
-
-    if (status != gcvSTATUS_OK)
+    /* VIV: Don't do sftware reset here for 0x2000, 0xfff5450 to workaround #12789. */
+    if(!(_IsHardwareMatch(hardware, gcv2000, 0xffff5450)))
     {
-        gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
-            "_ResetGPU failed: status=%d\n", status);
+        /* _ResetGPU need powerBaseAddress. */
+        status = _ResetGPU(hardware, Os, Core);
+
+        if (status != gcvSTATUS_OK)
+        {
+            gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                "_ResetGPU failed: status=%d\n", status);
+        }
     }
 
 #if gcdDEC_ENABLE_AHB
@@ -1611,9 +1625,6 @@ gckHARDWARE_Construct(
     }
 
     hardware->powerMutex = gcvNULL;
-
-    hardware->mmuVersion = gckHARDWARE_IsFeatureAvailable(hardware, gcvFEATURE_MMU);
-
 
     /* Determine whether bug fixes #1 are present. */
     hardware->extraEventStates = (gckHARDWARE_IsFeatureAvailable(hardware, gcvFEATURE_BUG_FIXES1) == gcvFALSE);
@@ -1722,12 +1733,18 @@ gckHARDWARE_Construct(
     {
         gctUINT32 ta = 0;
 
+        gcmkASSERT(gcvSTATUS_TRUE == gckHARDWARE_IsFeatureAvailable(hardware, gcvFEATURE_SECURITY_AHB));
+
         status = gckOS_QueryOption(Os, "TA", &ta);
 
         if (gcmIS_SUCCESS(status))
         {
             hardware->secureMode = ta ? gcvSECURE_IN_TA : gcvSECURE_IN_NORMAL;
         }
+    }
+    else if (gckHARDWARE_IsFeatureAvailable(hardware, gcvFEATURE_SECURITY_AHB))
+    {
+        hardware->secureMode = gcvSECURE_IN_NORMAL;
     }
 
     if (hardware->secureMode == gcvSECURE_IN_NORMAL)
@@ -1854,31 +1871,6 @@ gckHARDWARE_Destroy(
     gcmkVERIFY_OK(gckOS_AtomDestroy(Hardware->os, Hardware->pageTableDirty));
 
     gcmkVERIFY_OK(gckOS_AtomDestroy(Hardware->os, Hardware->pendingEvent));
-
-    if (Hardware->functionBytes)
-    {
-#if USE_KERNEL_VIRTUAL_BUFFERS
-        if (Hardware->kernel->virtualCommandBuffer)
-        {
-            gckVIRTUAL_COMMAND_BUFFER_PTR    buffer = (gckVIRTUAL_COMMAND_BUFFER_PTR)Hardware->functionPhysical;
-
-            gcmkVERIFY_OK(gckKERNEL_FreeVirtualMemory(
-                Hardware->functionPhysical,
-                Hardware->functionLogical,
-                gcvTRUE
-                ));
-        }
-        else
-#endif
-        {
-            gcmkVERIFY_OK(gckOS_FreeNonPagedMemory(
-                Hardware->os,
-                Hardware->functionBytes,
-                Hardware->functionPhysical,
-                Hardware->functionLogical
-                ));
-        }
-    }
 
 #if gcdLINK_QUEUE_SIZE
     gckQUEUE_Free(Hardware->os, &Hardware->linkQueue);
@@ -4316,7 +4308,6 @@ gckHARDWARE_Interrupt(
 
             if (gckHARDWARE_IsFeatureAvailable(Hardware, gcvFEATURE_BLT_ENGINE))
             {
-                /* TODO : Move it to a indpendent worker thread. */
                 status = gckEVENT_Notify(Hardware->kernel->asyncEvent, 0);
             }
     }
@@ -4797,7 +4788,6 @@ gckHARDWARE_FlushMMU(
     gctPOINTER pointer = gcvNULL;
     gctUINT32 flushSize;
     gctUINT32 count, offset;
-    gctPHYS_ADDR_T physical;
     gctUINT32 address;
     gctBOOL bltEngine;
     gctUINT32 semaphore, stall;
@@ -4880,9 +4870,7 @@ gckHARDWARE_FlushMMU(
 
         count = ((gctUINT)bufferSize - flushSize + 7) >> 3;
 
-        gcmkONERROR(gckOS_GetPhysicalAddress(command->os, buffer, &physical));
-
-        gcmkSAFECASTPHYSADDRT(address, physical);
+        address = command->address + command->offset;
 
         /* LINK to next slot to flush FE FIFO. */
         *buffer++
@@ -7828,9 +7816,10 @@ gckHARDWARE_SetPowerManagement(
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
 
-#if IMX8_DISABLE_PM
-    PowerManagement = gcvFALSE;
-#endif
+    if(_IsHardwareMatch(Hardware, gcv7000, 0x6008))
+    {
+        PowerManagement = gcvFALSE;
+    }
 
     gcmkVERIFY_OK(
         gckOS_AcquireMutex(Hardware->os, Hardware->powerMutex, gcvINFINITE));
@@ -8158,14 +8147,7 @@ gckHARDWARE_QueryIdle(
             gckOS_ReadRegisterEx(Hardware->os, Hardware->core, 0x00004, &idle));
 
         /* Pipe must be idle. */
-        if (((((((gctUINT32) (idle)) >> (0 ? 1:1)) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 1:1) - (0 ? 1:1) + 1)))))) ) != 1)
-        ||  ((((((gctUINT32) (idle)) >> (0 ? 3:3)) & ((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 3:3) - (0 ? 3:3) + 1)))))) ) != 1)
-        ||  ((((((gctUINT32) (idle)) >> (0 ? 4:4)) & ((gctUINT32) ((((1 ? 4:4) - (0 ? 4:4) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 4:4) - (0 ? 4:4) + 1)))))) ) != 1)
-        ||  ((((((gctUINT32) (idle)) >> (0 ? 5:5)) & ((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 5:5) - (0 ? 5:5) + 1)))))) ) != 1)
-        ||  ((((((gctUINT32) (idle)) >> (0 ? 6:6)) & ((gctUINT32) ((((1 ? 6:6) - (0 ? 6:6) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 6:6) - (0 ? 6:6) + 1)))))) ) != 1)
-        ||  ((((((gctUINT32) (idle)) >> (0 ? 7:7)) & ((gctUINT32) ((((1 ? 7:7) - (0 ? 7:7) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 7:7) - (0 ? 7:7) + 1)))))) ) != 1)
-        ||  ((((((gctUINT32) (idle)) >> (0 ? 2:2)) & ((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 2:2) - (0 ? 2:2) + 1)))))) ) != 1)
-        )
+        if (idle != 0x7ffffffe)
         {
             /* Something is busy. */
             isIdle = gcvFALSE;
@@ -10700,6 +10682,18 @@ gckHARDWARE_QueryContextNewProfile(
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
 
+    /*
+     * User-space can attach to whatever context it desires, leading first to a
+     * memory NULL pointer dereference when copying the counters, and later
+     * invocation of this function will dead-lock trying to acquire a lock that
+     * was already acquired. The context is converted to a pointer so even if
+     * user-space supplies another context would be transformed to a NULL value.
+     */
+    if ((Context == NULL) || (&Context->histroyNewProfiler_part1 == NULL) ||
+	(&Context->histroyNewProfiler_part2 == NULL)) {
+    	gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
+    }
+
     /* Acquire the context sequnence mutex. */
     gcmkONERROR(gckOS_AcquireMutex(
         command->os, command->mutexContextSeq, gcvINFINITE
@@ -10771,12 +10765,18 @@ gckHARDWARE_UpdateContextNewProfile(
     gctUINT32 totalRead, totalWrite;
     gctUINT32 mc_axi_max_min_latency;
     gctUINT32 temp;
+    gckCOMMAND command = Hardware->kernel->command;
 
     gcmkHEADER_ARG("Hardware=0x%x Context=0x%x", Hardware, Context);
 
     /* Verify the arguments. */
     gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
     gcmkVERIFY_OBJECT(Context, gcvOBJ_CONTEXT);
+
+    /* Acquire the context sequnence mutex. */
+    gcmkONERROR(gckOS_AcquireMutex(
+        command->os, command->mutexContextSeq, gcvINFINITE
+        ));
 
     chipModel = Hardware->identity.chipModel;
     chipRevision = Hardware->identity.chipRevision;
@@ -11938,11 +11938,20 @@ gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os, Hardware->core, 0x00478,   ((((g
     gcmkUPDATE_PROFILE_DATA_PART2(l2_axi1_total_latency);
     gcmkUPDATE_PROFILE_DATA_PART2(l2_axi1_total_request_count);
 
+    gcmkVERIFY_OK(gckOS_ReleaseMutex(
+        command->os, command->mutexContextSeq
+        ));
+
     /* Success. */
     gcmkFOOTER_NO();
     return gcvSTATUS_OK;
 
 OnError:
+
+    gckOS_ReleaseMutex(
+        command->os, command->mutexContextSeq
+        );
+
     /* Return the status. */
     gcmkFOOTER();
     return status;
@@ -13660,79 +13669,29 @@ OnError:
 **
 **  Existing Snippets:
 **  1. MMU Configure
-**     For new MMU, after GPU is reset, FE execute this command sequence to enble MMU.
+**     For new MMU, after GPU is reset, FE execute this command sequence to enable MMU.
 */
 gceSTATUS
 gckHARDWARE_PrepareFunctions(
     gckHARDWARE Hardware
     )
 {
-    gceSTATUS status;
     gckOS os;
+    gceSTATUS status;
     gctUINT32 offset = 0;
-    gctUINT32 mmuBytes;
     gctUINT32 endBytes;
     gctUINT32 flushBytes;
-    gctUINT32 eventBytes;
-    gctUINT32 dummyDrawBytes;
     gctUINT8_PTR logical;
     gctUINT32 address;
-    gctPHYS_ADDR_T physical;
     gcsHARDWARE_FUNCTION *function;
-    gctUINT8 i;
     gceDUMMY_DRAW_TYPE dummyDrawType = gcvDUMMY_DRAW_INVALID;
 
     gcmkHEADER_ARG("%x", Hardware);
 
     os = Hardware->os;
 
-    gcmkVERIFY_OK(gckOS_GetPageSize(os, &Hardware->functionBytes));
-
-#if USE_KERNEL_VIRTUAL_BUFFERS
-    if (Hardware->kernel->virtualCommandBuffer)
-    {
-        gcmkONERROR(gckKERNEL_AllocateVirtualCommandBuffer(
-            Hardware->kernel,
-            gcvFALSE,
-            &Hardware->functionBytes,
-            &Hardware->functionPhysical,
-            &Hardware->functionLogical
-            ));
-
-        gcmkONERROR(gckKERNEL_GetGPUAddress(
-            Hardware->kernel,
-            Hardware->functionLogical,
-            gcvFALSE,
-            Hardware->functionPhysical,
-            &Hardware->functionAddress
-            ));
-    }
-    else
-#endif
-    {
-        /* Allocate a command buffer. */
-        gcmkONERROR(gckOS_AllocateNonPagedMemory(
-            os,
-            gcvFALSE,
-            &Hardware->functionBytes,
-            &Hardware->functionPhysical,
-            &Hardware->functionLogical
-            ));
-
-        gcmkONERROR(gckOS_GetPhysicalAddress(
-            os,
-            Hardware->functionLogical,
-            &physical
-            ));
-
-        gcmkSAFECASTPHYSADDRT(Hardware->functionAddress, physical);
-
-        gcmkONERROR(gckMMU_FillFlatMapping(
-            Hardware->kernel->mmu,
-            Hardware->functionAddress,
-            Hardware->functionBytes
-            ));
-    }
+    gcmkVERIFY_OK(gckOS_GetPageSize(os, &Hardware->mmuFuncBytes));
+    Hardware->auxFuncBytes = Hardware->mmuFuncBytes;
 
     gcmkONERROR(gckHARDWARE_End(
         Hardware,
@@ -13743,53 +13702,108 @@ gckHARDWARE_PrepareFunctions(
 
     if (Hardware->mmuVersion > 0)
     {
+        gctUINT32 mmuBytes;
+        gctPHYS_ADDR_T physical = 0;
+
+        /* Allocate mmu command buffer within 32bit space */
+        gcmkONERROR(gckOS_AllocateNonPagedMemory(
+            os,
+            gcvFALSE,
+            &Hardware->mmuFuncBytes,
+            &Hardware->mmuFuncPhysical,
+            &Hardware->mmuFuncLogical
+            ));
+
+        gcmkONERROR(gckOS_GetPhysicalAddress(
+            os,
+            Hardware->mmuFuncLogical,
+            &physical
+            ));
+
+        if (physical & 0xFFFFFFFF00000000ULL)
+        {
+            gcmkFATAL("%s(%d): Command buffer physical address (0x%llx) for MMU setup exceeds 32bits",
+                      __FUNCTION__, __LINE__, physical);
+        }
+
         function = &Hardware->functions[gcvHARDWARE_FUNCTION_MMU];
+        function->logical = (gctUINT8_PTR)Hardware->mmuFuncLogical;
+        gcmkSAFECASTPHYSADDRT(function->address, physical);
 
-        /* MMU configure command sequence. */
-        function->logical = logical = (gctUINT8_PTR)Hardware->functionLogical + offset;
-
-        function->address = Hardware->functionAddress + offset;
+        gcmkONERROR(gckMMU_FillFlatMapping(
+            Hardware->kernel->mmu,
+            function->address,
+            Hardware->mmuFuncBytes
+            ));
 
         gcmkONERROR(gckHARDWARE_SetMMUStates(
             Hardware,
             Hardware->kernel->mmu->mtlbLogical,
             gcvMMU_MODE_4K,
             Hardware->kernel->mmu->safePageLogical,
-            logical,
+            function->logical,
             &mmuBytes
             ));
 
-        offset += mmuBytes;
-
-        logical = (gctUINT8_PTR)Hardware->functionLogical + offset;
-        address = Hardware->functionAddress + offset;
+        function->endAddress = function->address + mmuBytes;
+        function->endLogical = function->logical + mmuBytes;
 
         gcmkONERROR(gckHARDWARE_End(
             Hardware,
-            logical,
-            address,
+            function->endLogical,
+            function->endAddress,
             &endBytes
             ));
 
-#if USE_KERNEL_VIRTUAL_BUFFERS
-        if (Hardware->kernel->virtualCommandBuffer)
-        {
-            gcmkONERROR(gckKERNEL_GetGPUAddress(
-                Hardware->kernel,
-                logical,
-                gcvFALSE,
-                Hardware->functionPhysical,
-                &Hardware->lastEnd
-                ));
-        }
-#endif
-
-        offset += endBytes;
-
         function->bytes = mmuBytes + endBytes;
+    }
 
-        function->endAddress = function->address + mmuBytes;
-        function->endLogical = function->logical + mmuBytes;
+#if USE_KERNEL_VIRTUAL_BUFFERS
+    if (Hardware->kernel->virtualCommandBuffer)
+    {
+        gcmkONERROR(gckKERNEL_AllocateVirtualCommandBuffer(
+            Hardware->kernel,
+            gcvFALSE,
+            &Hardware->auxFuncBytes,
+            &Hardware->auxFuncPhysical,
+            &Hardware->auxFuncLogical
+            ));
+
+        gcmkONERROR(gckKERNEL_GetGPUAddress(
+            Hardware->kernel,
+            Hardware->auxFuncLogical,
+            gcvFALSE,
+            Hardware->auxFuncPhysical,
+            &Hardware->auxFuncAddress
+            ));
+    }
+    else
+#endif
+    {
+        gctPHYS_ADDR_T physical = 0;
+
+        /* Allocate a command buffer. */
+        gcmkONERROR(gckOS_AllocateNonPagedMemory(
+            os,
+            gcvFALSE,
+            &Hardware->auxFuncBytes,
+            &Hardware->auxFuncPhysical,
+            &Hardware->auxFuncLogical
+            ));
+
+        gcmkONERROR(gckOS_GetPhysicalAddress(
+            os,
+            Hardware->auxFuncLogical,
+            &physical
+            ));
+
+        gcmkSAFECASTPHYSADDRT(Hardware->auxFuncAddress, physical);
+
+        gcmkONERROR(gckMMU_FillFlatMapping(
+            Hardware->kernel->mmu,
+            Hardware->auxFuncAddress,
+            Hardware->auxFuncBytes
+            ));
     }
 
     /*
@@ -13797,9 +13811,9 @@ gckHARDWARE_PrepareFunctions(
     */
     function = &Hardware->functions[gcvHARDWARE_FUNCTION_FLUSH];
 
-    function->logical = logical = (gctUINT8_PTR)Hardware->functionLogical + offset;
+    function->logical = logical = (gctUINT8_PTR)Hardware->auxFuncLogical + offset;
 
-    function->address = Hardware->functionAddress + offset;
+    function->address = Hardware->auxFuncAddress + offset;
 
     /* Get the size of the flush command. */
     gcmkONERROR(gckHARDWARE_Flush(Hardware, gcvFLUSH_ALL, gcvNULL, &flushBytes));
@@ -13809,8 +13823,8 @@ gckHARDWARE_PrepareFunctions(
 
     offset += flushBytes;
 
-    logical = (gctUINT8_PTR)Hardware->functionLogical + offset;
-    address = Hardware->functionAddress + offset;
+    logical = (gctUINT8_PTR)Hardware->auxFuncLogical + offset;
+    address = Hardware->auxFuncAddress + offset;
 
     gcmkONERROR(gckHARDWARE_End(Hardware, logical, address, &endBytes));
 
@@ -13821,7 +13835,7 @@ gckHARDWARE_PrepareFunctions(
             Hardware->kernel,
             logical,
             gcvFALSE,
-            Hardware->functionPhysical,
+            Hardware->auxFuncPhysical,
             &Hardware->lastEnd
             ));
     }
@@ -13839,10 +13853,13 @@ gckHARDWARE_PrepareFunctions(
     */
     if (gckHARDWARE_IsFeatureAvailable(Hardware, gcvFEATURE_BLT_ENGINE))
     {
+        gctUINT8 i;
+        gctUINT32 eventBytes;
+
         function = &Hardware->functions[gcvHARDWARE_FUNCTION_BLT_EVENT];
 
-        function->logical = logical = (gctUINT8_PTR)Hardware->functionLogical + offset;
-        function->address = Hardware->functionAddress + offset;
+        function->logical = logical = (gctUINT8_PTR)Hardware->auxFuncLogical + offset;
+        function->address = Hardware->auxFuncAddress + offset;
 
         gcmkONERROR(gckHARDWARE_Event(Hardware, gcvNULL, 0, gcvKERNEL_BLT, &eventBytes));
 
@@ -13878,10 +13895,12 @@ gckHARDWARE_PrepareFunctions(
 
     if (dummyDrawType != gcvDUMMY_DRAW_INVALID)
     {
+        gctUINT32 dummyDrawBytes;
+
         function = &Hardware->functions[gcvHARDWARE_FUNCTION_DUMMY_DRAW];
 
-        function->logical = logical = (gctUINT8_PTR)Hardware->functionLogical + offset;
-        function->address = Hardware->functionAddress + offset;
+        function->logical = logical = (gctUINT8_PTR)Hardware->auxFuncLogical + offset;
+        function->address = Hardware->auxFuncAddress + offset;
 
         /* Append a dummy draw. */
         gcmkONERROR(gckHARDWARE_DummyDraw(Hardware, logical, function->address, dummyDrawType, &dummyDrawBytes));
@@ -13900,7 +13919,7 @@ gckHARDWARE_PrepareFunctions(
 
         function->bytes = dummyDrawBytes + endBytes;
     }
-    gcmkASSERT(offset < Hardware->functionBytes);
+    gcmkASSERT(offset < Hardware->auxFuncBytes)
 
     gcmkFOOTER_NO();
     return gcvSTATUS_OK;
@@ -13908,6 +13927,50 @@ gckHARDWARE_PrepareFunctions(
 OnError:
     gcmkFOOTER();
     return status;
+}
+
+gceSTATUS
+gckHARDWARE_DestroyFunctions(
+    gckHARDWARE Hardware
+    )
+{
+    gcmkHEADER_ARG("%x", Hardware);
+
+    if (Hardware->auxFuncPhysical)
+    {
+#if USE_KERNEL_VIRTUAL_BUFFERS
+        if (Hardware->kernel->virtualCommandBuffer)
+        {
+            gcmkVERIFY_OK(gckKERNEL_FreeVirtualMemory(
+                Hardware->auxFuncPhysical,
+                Hardware->auxFuncLogical,
+                gcvFALSE
+                ));
+        }
+        else
+#endif
+        {
+            gcmkVERIFY_OK(gckOS_FreeNonPagedMemory(
+                Hardware->os,
+                Hardware->auxFuncBytes,
+                Hardware->auxFuncPhysical,
+                Hardware->auxFuncLogical
+                ));
+        }
+    }
+
+    if (Hardware->mmuFuncPhysical)
+    {
+        gcmkVERIFY_OK(gckOS_FreeNonPagedMemory(
+            Hardware->os,
+            Hardware->mmuFuncBytes,
+            Hardware->mmuFuncPhysical,
+            Hardware->mmuFuncLogical
+            ));
+    }
+
+    gcmkFOOTER_NO();
+    return gcvSTATUS_OK;
 }
 
 gceSTATUS
@@ -13919,23 +13982,24 @@ gckHARDWARE_ExecuteFunctions(
     gceSTATUS status;
     gctUINT32 idle;
     gctUINT32 timer = 0, delay = 1;
+    gcsHARDWARE_FUNCTION * function = &Hardware->functions[Function];
+    gctUINT32 address = function->address - Hardware->baseAddress;
 
     /* Execute prepared command sequence. */
     gcmkONERROR(gckHARDWARE_Execute(
         Hardware,
-        Hardware->functions[Function].address,
-        Hardware->functions[Function].bytes
+        address,
+        function->bytes
         ));
 
 #if gcdLINK_QUEUE_SIZE
     {
         gcuQUEUEDATA data;
-        gcsHARDWARE_FUNCTION * function = &Hardware->functions[Function];
 
         gcmkVERIFY_OK(gckOS_GetProcessID(&data.linkData.pid));
 
-        data.linkData.start    = function->address;
-        data.linkData.end      = function->address + function->bytes;
+        data.linkData.start    = address;
+        data.linkData.end      = address + function->bytes;
         data.linkData.linkLow  = 0;
         data.linkData.linkHigh = 0;
 
@@ -13945,8 +14009,8 @@ gckHARDWARE_ExecuteFunctions(
 
     gcmkDUMPCOMMAND(
         Hardware->os,
-        Hardware->functions[Function].logical,
-        Hardware->functions[Function].bytes,
+        function->logical,
+        function->bytes,
         gceDUMP_BUFFER_KERNEL,
         gcvTRUE
         );
@@ -13983,7 +14047,7 @@ gckHARDWARE_ExecuteFunctions(
         }
 #endif
     }
-    while (!(((((gctUINT32) (idle)) >> (0 ? 0:0)) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0U : (~(~0U << ((1 ? 0:0) - (0 ? 0:0) + 1)))))) ));
+    while (!_IsGPUIdle(idle));
 
     return gcvSTATUS_OK;
 
@@ -13998,10 +14062,10 @@ gckHARDWARE_AddressInHardwareFuncions(
     OUT gctPOINTER *Pointer
     )
 {
-    if (Address >= Hardware->functionAddress && Address <= Hardware->functionAddress - 1 + Hardware->functionBytes)
+    if (Address >= Hardware->auxFuncAddress && Address <= Hardware->auxFuncAddress - 1 + Hardware->auxFuncBytes)
     {
-        *Pointer = (gctUINT8_PTR)Hardware->functionLogical
-                 + (Address - Hardware->functionAddress)
+        *Pointer = (gctUINT8_PTR)Hardware->auxFuncLogical
+                 + (Address - Hardware->auxFuncAddress)
                  ;
 
         return gcvSTATUS_OK;

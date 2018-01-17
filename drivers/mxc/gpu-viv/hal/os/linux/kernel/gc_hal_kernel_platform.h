@@ -2,7 +2,7 @@
 *
 *    The MIT License (MIT)
 *
-*    Copyright (c) 2014 - 2016 Vivante Corporation
+*    Copyright (c) 2014 - 2017 Vivante Corporation
 *
 *    Permission is hereby granted, free of charge, to any person obtaining a
 *    copy of this software and associated documentation files (the "Software"),
@@ -26,7 +26,7 @@
 *
 *    The GPL License (GPL)
 *
-*    Copyright (C) 2014 - 2016 Vivante Corporation
+*    Copyright (C) 2014 - 2017 Vivante Corporation
 *
 *    This program is free software; you can redistribute it and/or
 *    modify it under the terms of the GNU General Public License
@@ -106,6 +106,28 @@ typedef struct _gcsPLATFORM_OPERATIONS
     */
     gctBOOL
     (*needAddDevice)(
+        IN gckPLATFORM Platform
+        );
+
+    /*******************************************************************************
+    **
+    **  registerDevice
+    **
+    **  Determine whether platform device need to be registered
+    */
+    gceSTATUS
+    (*registerDevice)(
+        IN gckPLATFORM Platform
+        );
+
+    /*******************************************************************************
+    **
+    **  runRegisterDevice
+    **
+    **  Unregister platform device
+    */
+    gceSTATUS
+    (*unRegisterDevice)(
         IN gckPLATFORM Platform
         );
 
